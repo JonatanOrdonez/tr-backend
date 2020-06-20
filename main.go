@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"os"
 
@@ -18,8 +19,12 @@ func getServers(ctx *fasthttp.RequestCtx) {
 }
 
 func main() {
-	goDotenv.Load()
-	//F Init environment variables...
+	envErr := goDotenv.Load(".env.local")
+
+	if envErr != nil {
+		fmt.Println("Local variables cannot be loaded")
+	}
+	// Init environment variables...
 	dbHost := os.Getenv("DB_HOST")
 	dbName := os.Getenv("DB_NAME")
 	dbUser := os.Getenv("DB_USER")
@@ -50,6 +55,8 @@ func main() {
 			AllowMaxAge:      5600,                    // cache the preflight result
 			Debug:            true,
 		})
+
+		fmt.Println("Starting server...")
 		if err := fasthttp.ListenAndServe(":"+port, withCors.CorsMiddleware(router.Handler)); err != nil {
 			log.Fatalf("Error in ListenAndServe: %s", err.Error())
 		}
