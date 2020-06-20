@@ -161,7 +161,11 @@ func findWordInData(word string, rawData string, chanel chan string) {
 // (title): Web page title
 // (error): Error if the process fails
 func (s *DomainService) ScrapPage(url string) (logo string, title string, err error) {
-	scraper, err := goscraper.Scrape(url, 5)
+	domain := url
+	if strings.HasPrefix(domain, "ht") == false {
+		domain = fmt.Sprintf("http://%s", domain)
+	}
+	scraper, err := goscraper.Scrape(domain, 5)
 	if err != nil {
 		return "", "", nil
 	}

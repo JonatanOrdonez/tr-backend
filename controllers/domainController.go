@@ -97,18 +97,14 @@ func (h *BaseHandler) addDomain(ctx *fasthttp.RequestCtx, hostPath string) {
 	}
 	sslGrade := ""
 	lowerServer, lsErr := h.domainService.GetLowerServer(servers)
-	if lsErr != nil {
+	if lsErr == nil {
 		sslGrade = lowerServer.SslGrade
 	}
 	isDown := true
 	if ssllabs.Status == "READY" {
 		isDown = false
 	}
-	logo, title, scrapError := h.domainService.ScrapPage(hostPath)
-	if scrapError != nil {
-		h.domainService.RaiseError(ctx, 400, scrapError.Error())
-		return
-	}
+	logo, title, _ := h.domainService.ScrapPage(hostPath)
 	UpdatedAt := time.Now().Unix()
 	newDomain := &models.Domain{servers, false, sslGrade, sslGrade, logo, title, isDown, 1, hostPath, UpdatedAt}
 	id, saveDomainError := h.domainRepo.Save(newDomain)
@@ -174,7 +170,7 @@ func (h *BaseHandler) updateDomain(ctx *fasthttp.RequestCtx, hostPath string, do
 	if serversAreEqual && elapsed < 0 {
 		sslGrade := ""
 		lowerServer, lsErr := h.domainService.GetLowerServer(servers)
-		if lsErr != nil {
+		if lsErr == nil {
 			sslGrade = lowerServer.SslGrade
 		}
 		isDown := true
