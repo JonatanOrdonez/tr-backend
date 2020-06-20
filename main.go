@@ -36,7 +36,7 @@ func main() {
 	// Init database...
 	db, err := db.StartPostgresqlConnection(dbUser, dbHost, dbName)
 	if err != nil {
-		log.Fatal("Database cannot be started")
+		log.Fatal(err.Error())
 	} else {
 		// Init repositories...
 		domainRepo := repositories.NewDomainRepository(db)
