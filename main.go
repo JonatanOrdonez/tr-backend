@@ -19,11 +19,14 @@ func getServers(ctx *fasthttp.RequestCtx) {
 }
 
 func main() {
-	envErr := goDotenv.Load(".env.local")
-
-	if envErr != nil {
-		fmt.Println("Local variables cannot be loaded")
+	env := os.Getenv("GO_ENV")
+	if env == "dev" {
+		envErr := goDotenv.Load(".env.local")
+		if envErr != nil {
+			fmt.Println("Local variables cannot be loaded")
+		}
 	}
+
 	// Init environment variables...
 	dbHost := os.Getenv("DB_HOST")
 	dbName := os.Getenv("DB_NAME")
