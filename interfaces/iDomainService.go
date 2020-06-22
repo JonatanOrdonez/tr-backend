@@ -13,4 +13,6 @@ type IDomainService interface {
 	RaiseError(ctx *fasthttp.RequestCtx, errorCode int, errorMessage string)
 	ServersAreEqual(serversA []models.Server, serversB []models.Server) bool
 	GetLowerServer(servers []models.Server) (*models.Server, error)
+	GetDomains() ([]byte, error)
+	CheckDomain(hostPath string) ([]byte, error)
 }

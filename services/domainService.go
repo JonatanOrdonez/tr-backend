@@ -9,6 +9,9 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
+
+	interfaces "github.com/JonatanOrdonez/tr-backend/interfaces"
 
 	"github.com/JonatanOrdonez/tr-backend/models"
 	"github.com/badoux/goscraper"
@@ -18,13 +21,177 @@ import (
 
 // DomainService: Structure used to store the domainService functions
 type DomainService struct {
+	domainRepo interfaces.IDomainRepository
 }
 
-// NewDomainService: Returns the initialization of the DomainService structure
+// NewDomainService: Receives a reference to the domainRepo interface and stores it in the DomainService structure
+// Params:
+// (domainRepo): Reference to a domainRepo interface
 // Return:
-// (*DomainService): Reference to the DomainService object
-func NewDomainService() *DomainService {
-	return &DomainService{}
+// (*DomainService): Reference to the BaseHandler object
+func NewDomainService(domainRepo interfaces.IDomainRepository) *DomainService {
+	return &DomainService{domainRepo: domainRepo}
+}
+
+// ResponseDomains: Returns a JSON object domain Slice
+// Return:
+// ([]byte): JSON object
+// (error): Error if the process fails
+func (s *DomainService) GetDomains() ([]byte, error) {
+	domains, err := s.domainRepo.GetAll()
+	if err != nil {
+		return nil, err
+	}
+	jsonBody, jsonError := json.Marshal(domains)
+	if jsonError != nil {
+		return nil, jsonError
+	}
+	return jsonBody, nil
+}
+
+// CheckDomain: Checks if the domain exists
+// If the request has the host query param empty (""), the redirection is made to ResponseDomains
+// If a domain is not found that matches its url as host, then the redirection is made to AddDomain function
+// If there is a domain such that the url equals host, then the redirection is made to UpdateDomain function
+// Params:
+// (hostPath): Host value of the path param
+// Return:
+// ([]byte): JSON object
+// (error): Error if the process fails
+func (s *DomainService) CheckDomain(hostPath string) ([]byte, error) {
+	domain, domainErr := s.domainRepo.FindByUrl(hostPath)
+	if domainErr != nil {
+		return s.AddDomain(hostPath)
+	} else {
+		return s.UpdateDomain(hostPath, domain)
+	}
+}
+
+// AddDomain: Creates a new domain in the database, according to the requirements of the test.
+// Params:
+// (hostPath): Host value of the path param
+// Return:
+// ([]byte): JSON object
+// (error): Error if the process fails
+func (s *DomainService) AddDomain(hostPath string) ([]byte, error) {
+	var ssllabs *models.Ssllabs
+	var ssllabsError error
+	ssllabs, ssllabsError = s.CheckDomainInSsllabs(hostPath)
+	if ssllabsError != nil {
+		return nil, ssllabsError
+	}
+	if ssllabs.Status == "ERROR" {
+		return nil, errors.New(ssllabs.StatusMessage)
+
+	}
+	if ssllabs.Status == "DNS" {
+		ssllabs, ssllabsError = s.CheckDomainInSsllabs(hostPath)
+	}
+	if ssllabsError != nil {
+		return nil, errors.New(ssllabs.StatusMessage)
+	}
+	if ssllabs.Status == "ERROR" {
+		return nil, errors.New(ssllabs.StatusMessage)
+	}
+	servers, fetchSDError := s.FetchServersData(ssllabs.Endpoints)
+	fmt.Println(fmt.Sprintf("Dominios:%d | Servidores:%d", len(ssllabs.Endpoints), len(servers)))
+	if fetchSDError != nil {
+		return nil, fetchSDError
+	}
+	sslGrade := ""
+	lowerServer, lsErr := s.GetLowerServer(servers)
+	if lsErr == nil {
+		sslGrade = lowerServer.SslGrade
+	}
+	isDown := true
+	if ssllabs.Status == "READY" {
+		isDown = false
+	}
+	logo, title, _ := s.ScrapPage(hostPath)
+	UpdatedAt := time.Now().Unix()
+	newDomain := &models.Domain{servers, false, sslGrade, sslGrade, logo, title, isDown, 1, hostPath, UpdatedAt}
+	id, saveDomainError := s.domainRepo.Save(newDomain)
+	if saveDomainError != nil {
+		return nil, saveDomainError
+	}
+	domainEntity, queryErr := s.domainRepo.FindByID(id)
+	if queryErr != nil {
+		return nil, queryErr
+	}
+	jsonBody, jsonError := json.Marshal(domainEntity)
+	if jsonError != nil {
+		return nil, jsonError
+	}
+	return jsonBody, nil
+}
+
+// UpdateDomain: Update a new domain in the database, according to the requirements of the test.
+// Params:
+// (hostPath): Host value of the path param
+// (domain): Reference to the domain
+// ([]byte): JSON object
+// (error): Error if the process fails
+func (s *DomainService) UpdateDomain(hostPath string, domain *models.Domain) ([]byte, error) {
+	var ssllabs *models.Ssllabs
+	var ssllabsError error
+	ssllabs, ssllabsError = s.CheckDomainInSsllabs(hostPath)
+	if ssllabsError != nil {
+		return nil, ssllabsError
+	}
+	if ssllabs.Status == "ERROR" {
+		return nil, errors.New(ssllabs.StatusMessage)
+	}
+	if ssllabs.Status == "DNS" {
+		ssllabs, ssllabsError = s.CheckDomainInSsllabs(hostPath)
+	}
+	if ssllabsError != nil {
+		return nil, ssllabsError
+	}
+	if ssllabs.Status == "ERROR" {
+		return nil, errors.New(ssllabs.StatusMessage)
+	}
+	currentServers := domain.Servers
+	servers, fetchSDError := s.FetchServersData(ssllabs.Endpoints)
+	if fetchSDError != nil {
+		return nil, fetchSDError
+	}
+	serversAreEqual := s.ServersAreEqual(currentServers, servers)
+	currentDate := time.Unix(time.Now().Unix(), 0)
+	updatedAt := time.Unix(domain.UpdatedAt, 0)
+	elapsed := currentDate.Sub(updatedAt).Hours()
+	serversChanged := false
+	if serversAreEqual && elapsed < 0 {
+		sslGrade := ""
+		lowerServer, lsErr := s.GetLowerServer(servers)
+		if lsErr == nil {
+			sslGrade = lowerServer.SslGrade
+		}
+		isDown := true
+		if ssllabs.Status == "READY" {
+			isDown = false
+		}
+		newUpdatedAt := time.Now().Unix()
+		newDomain := &models.Domain{servers, serversChanged, sslGrade, domain.SslGrade, domain.Logo, domain.Title, isDown, domain.Id, hostPath, newUpdatedAt}
+		id, updatedErr := s.domainRepo.Update(newDomain)
+		if updatedErr != nil {
+			return nil, updatedErr
+		}
+		domainEntity, queryErr := s.domainRepo.FindByID(id)
+		if queryErr != nil {
+			return nil, queryErr
+		}
+		jsonBody, jsonError := json.Marshal(domainEntity)
+		if jsonError != nil {
+			return nil, jsonError
+		}
+		return jsonBody, nil
+	} else {
+		jsonBody, jsonError := json.Marshal(domain)
+		if jsonError != nil {
+			return nil, jsonError
+		}
+		return jsonBody, nil
+	}
 }
 
 // CheckDomainInSsllabs: Takes a domain url and makes a request to the Ssllabs api for obtain information

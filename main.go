@@ -40,12 +40,12 @@ func main() {
 	} else {
 		// Init repositories...
 		domainRepo := repositories.NewDomainRepository(db)
-		domainService := services.NewDomainService()
-		domainHandler := controllers.NewDomainHandler(domainRepo, domainService)
+		domainService := services.NewDomainService(domainRepo)
+		domainController := controllers.NewDomainController(domainService)
 
 		// Init router...
 		router := fasthttprouter.New()
-		router.GET("/api/v1/analyze", domainHandler.CheckDomain)
+		router.GET("/api/v1/analyze", domainController.ResponseCheckDomain)
 
 		withCors := cors.NewCorsHandler(cors.Options{
 			// if you leave allowedOrigins empty then fasthttpcors will treat it as "*"

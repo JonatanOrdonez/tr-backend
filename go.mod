@@ -3,7 +3,7 @@ module github.com/JonatanOrdonez/tr-backend
 go 1.14
 
 require (
-	github.com/AdhityaRamadhanus/fasthttpcors v0.0.0-20170121111917-d4c07198763a // indirect
+	github.com/AdhityaRamadhanus/fasthttpcors v0.0.0-20170121111917-d4c07198763a
 	github.com/badoux/goscraper v0.0.0-20190827161153-36995ce6b19f
 	github.com/buaazp/fasthttprouter v0.1.1
 	github.com/joho/godotenv v1.3.0
