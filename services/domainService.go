@@ -42,7 +42,8 @@ func (s *DomainService) GetDomains() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	jsonBody, jsonError := json.Marshal(domains)
+	items := &models.Items{domains}
+	jsonBody, jsonError := json.Marshal(items)
 	if jsonError != nil {
 		return nil, jsonError
 	}
