@@ -3,7 +3,7 @@ package models
 // Endpoint entity...
 type Endpoint struct {
 	IpAddress            string `json:"ipAddress"`
-	serverName           string `json:"serverName"`
+	ServerName           string `json:"serverName"`
 	StatusMessage        string `json:"statusMessage"`
 	Grade                string `json:"grade"`
 	GradeTrustIgnored    string `json:"gradeTrustIgnored"`

@@ -82,8 +82,22 @@ func (s *DomainService) AddDomain(hostPath string) ([]byte, error) {
 		return nil, ssllabsError
 	}
 	if ssllabs.Status == "ERROR" {
-		return nil, errors.New(ssllabs.StatusMessage)
-
+		servers := []models.Server{}
+		UpdatedAt := time.Now().Unix()
+		newDomain := &models.Domain{servers, ssllabs.Endpoints, false, "", "", "", "", true, 1, hostPath, UpdatedAt}
+		id, saveDomainError := s.domainRepo.Save(newDomain)
+		if saveDomainError != nil {
+			return nil, saveDomainError
+		}
+		domainEntity, queryErr := s.domainRepo.FindByID(id)
+		if queryErr != nil {
+			return nil, queryErr
+		}
+		jsonBody, jsonError := json.Marshal(domainEntity)
+		if jsonError != nil {
+			return nil, jsonError
+		}
+		return jsonBody, nil
 	}
 	if ssllabs.Status == "DNS" {
 		ssllabs, ssllabsError = s.CheckDomainInSsllabs(hostPath)
@@ -92,10 +106,25 @@ func (s *DomainService) AddDomain(hostPath string) ([]byte, error) {
 		return nil, errors.New(ssllabs.StatusMessage)
 	}
 	if ssllabs.Status == "ERROR" {
-		return nil, errors.New(ssllabs.StatusMessage)
+		servers := []models.Server{}
+		endpoints := []models.Endpoint{}
+		UpdatedAt := time.Now().Unix()
+		newDomain := &models.Domain{servers, endpoints, false, "", "", "", "", true, 1, hostPath, UpdatedAt}
+		id, saveDomainError := s.domainRepo.Save(newDomain)
+		if saveDomainError != nil {
+			return nil, saveDomainError
+		}
+		domainEntity, queryErr := s.domainRepo.FindByID(id)
+		if queryErr != nil {
+			return nil, queryErr
+		}
+		jsonBody, jsonError := json.Marshal(domainEntity)
+		if jsonError != nil {
+			return nil, jsonError
+		}
+		return jsonBody, nil
 	}
 	servers, fetchSDError := s.FetchServersData(ssllabs.Endpoints)
-	fmt.Println(fmt.Sprintf("Dominios:%d | Servidores:%d", len(ssllabs.Endpoints), len(servers)))
 	if fetchSDError != nil {
 		return nil, fetchSDError
 	}
@@ -104,13 +133,9 @@ func (s *DomainService) AddDomain(hostPath string) ([]byte, error) {
 	if lsErr == nil {
 		sslGrade = lowerServer.SslGrade
 	}
-	isDown := true
-	if ssllabs.Status == "READY" {
-		isDown = false
-	}
 	logo, title, _ := s.ScrapPage(hostPath)
 	UpdatedAt := time.Now().Unix()
-	newDomain := &models.Domain{servers, false, sslGrade, sslGrade, logo, title, isDown, 1, hostPath, UpdatedAt}
+	newDomain := &models.Domain{servers, ssllabs.Endpoints, false, sslGrade, sslGrade, logo, title, false, 1, hostPath, UpdatedAt}
 	id, saveDomainError := s.domainRepo.Save(newDomain)
 	if saveDomainError != nil {
 		return nil, saveDomainError
@@ -140,7 +165,11 @@ func (s *DomainService) UpdateDomain(hostPath string, domain *models.Domain) ([]
 		return nil, ssllabsError
 	}
 	if ssllabs.Status == "ERROR" {
-		return nil, errors.New(ssllabs.StatusMessage)
+		jsonBody, jsonError := json.Marshal(domain)
+		if jsonError != nil {
+			return nil, jsonError
+		}
+		return jsonBody, nil
 	}
 	if ssllabs.Status == "DNS" {
 		ssllabs, ssllabsError = s.CheckDomainInSsllabs(hostPath)
@@ -149,30 +178,28 @@ func (s *DomainService) UpdateDomain(hostPath string, domain *models.Domain) ([]
 		return nil, ssllabsError
 	}
 	if ssllabs.Status == "ERROR" {
-		return nil, errors.New(ssllabs.StatusMessage)
+		jsonBody, jsonError := json.Marshal(domain)
+		if jsonError != nil {
+			return nil, jsonError
+		}
+		return jsonBody, nil
 	}
-	currentServers := domain.Servers
-	servers, fetchSDError := s.FetchServersData(ssllabs.Endpoints)
-	if fetchSDError != nil {
-		return nil, fetchSDError
-	}
-	serversAreEqual := s.ServersAreEqual(currentServers, servers)
+	endpointsAreEquals := s.EndpointsAreEqual(domain.Endpoints, ssllabs.Endpoints)
 	currentDate := time.Unix(time.Now().Unix(), 0)
 	updatedAt := time.Unix(domain.UpdatedAt, 0)
 	elapsed := currentDate.Sub(updatedAt).Hours()
-	serversChanged := false
-	if serversAreEqual && elapsed < 0 {
-		sslGrade := ""
+	if endpointsAreEquals == false && elapsed < 1 {
+		servers, fetchSDError := s.FetchServersData(ssllabs.Endpoints)
+		if fetchSDError != nil {
+			return nil, fetchSDError
+		}
 		lowerServer, lsErr := s.GetLowerServer(servers)
+		sslGrade := ""
 		if lsErr == nil {
 			sslGrade = lowerServer.SslGrade
 		}
-		isDown := true
-		if ssllabs.Status == "READY" {
-			isDown = false
-		}
 		newUpdatedAt := time.Now().Unix()
-		newDomain := &models.Domain{servers, serversChanged, sslGrade, domain.SslGrade, domain.Logo, domain.Title, isDown, domain.Id, hostPath, newUpdatedAt}
+		newDomain := &models.Domain{servers, ssllabs.Endpoints, true, sslGrade, domain.SslGrade, domain.Logo, domain.Title, false, domain.Id, hostPath, newUpdatedAt}
 		id, updatedErr := s.domainRepo.Update(newDomain)
 		if updatedErr != nil {
 			return nil, updatedErr
@@ -187,7 +214,16 @@ func (s *DomainService) UpdateDomain(hostPath string, domain *models.Domain) ([]
 		}
 		return jsonBody, nil
 	} else {
-		jsonBody, jsonError := json.Marshal(domain)
+		domain.ServersChanged = false
+		id, updatedErr := s.domainRepo.Update(domain)
+		if updatedErr != nil {
+			return nil, updatedErr
+		}
+		domainEntity, queryErr := s.domainRepo.FindByID(id)
+		if queryErr != nil {
+			return nil, queryErr
+		}
+		jsonBody, jsonError := json.Marshal(domainEntity)
 		if jsonError != nil {
 			return nil, jsonError
 		}
@@ -353,39 +389,80 @@ func (s *DomainService) RaiseError(ctx *fasthttp.RequestCtx, errorCode int, erro
 	ctx.Response.SetBody(jsonBody)
 }
 
-// RaiseError: Takes two server slices and compares them
+// RaiseError: Takes two endpoint slices and compares them
 // Params:
-// (serverA): First server slice
-// (serverB): Second server slice
+// (endpointA): First endpoint slice
+// (endpointB): Second endpoint slice
 // Return
-// (bool): True if the servers are equal. False if not
-func (s *DomainService) ServersAreEqual(serversA []models.Server, serversB []models.Server) bool {
-	if len(serversA) != len(serversB) {
+// (bool): True if the endpoint slices are equal. False if not
+func (s *DomainService) EndpointsAreEqual(endpointsA []models.Endpoint, endpointsB []models.Endpoint) bool {
+	if len(endpointsA) != len(endpointsB) {
 		return false
 	}
-	for _, serverA := range serversA {
-		serverB, err := findServer(serverA.Address, serversB)
+	for _, endpointA := range endpointsA {
+		endpointB, err := findEndpoint(endpointA.IpAddress, endpointsB)
 		if err != nil {
 			return false
-		} else if serverA.SslGrade != serverB.SslGrade {
+		}
+		if compareEndpoints(endpointA, endpointB) == false {
 			return false
 		}
 	}
 	return true
 }
 
-// RaiseError: Takes a server address and searches it in a server slice
+// findEndpoint: Takes a endpoint ip address and searches it into a endpoint slice
 // Params:
-// (address): Server ip address
-// (servers): Server slice
+// (IpAddress): Endpoint ip address
+// (endpoints): Endpoint slice
 // Return
-// (models.Server): Server object that was found
+// (models.Endpoint): Endpoint object that was found
 // (error): Error if the process fails
-func findServer(address string, servers []models.Server) (models.Server, error) {
-	for _, server := range servers {
-		if server.Address == address {
-			return server, nil
+func findEndpoint(IpAddress string, endpoints []models.Endpoint) (models.Endpoint, error) {
+	for _, endpoint := range endpoints {
+		if IpAddress == endpoint.IpAddress {
+			return endpoint, nil
 		}
 	}
-	return models.Server{}, errors.New("Server not found")
+	return models.Endpoint{}, errors.New("Endpoint not found")
+}
+
+// compareEndpoints: Takes two endpoint objects and compares them
+// Params:
+// (endpointA): First Endpoint object
+// (endpointB): Second Endpoint object
+// Return
+// (bool): True if endpoints are equals. False if not
+func compareEndpoints(endpointA models.Endpoint, endpointB models.Endpoint) bool {
+	if endpointA.ServerName != endpointB.ServerName {
+		return false
+	}
+	if endpointA.StatusMessage != endpointB.StatusMessage {
+		return false
+	}
+	if endpointA.Grade != endpointB.Grade {
+		return false
+	}
+	if endpointA.GradeTrustIgnored != endpointB.GradeTrustIgnored {
+		return false
+	}
+	if endpointA.IsExceptional != endpointB.IsExceptional {
+		return false
+	}
+	if endpointA.Progress != endpointB.Progress {
+		return false
+	}
+	if endpointA.Duration != endpointB.Duration {
+		return false
+	}
+	if endpointA.StatusDetails != endpointB.StatusDetails {
+		return false
+	}
+	if endpointA.StatusDetailsMessage != endpointB.StatusDetailsMessage {
+		return false
+	}
+	if endpointA.Delegation != endpointB.Delegation {
+		return false
+	}
+	return true
 }

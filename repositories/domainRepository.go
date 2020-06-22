@@ -30,16 +30,23 @@ func NewDomainRepository(db *sql.DB) *DomainRepo {
 func (r *DomainRepo) FindByID(ID int64) (*models.Domain, error) {
 	var id, updatedAt int64
 	var url, sslGrade, previousSslGrade, logo, title string
-	var servers []byte
-	err := r.db.QueryRow("SELECT * FROM domains WHERE id=$1", ID).Scan(&id, &servers, &url, &sslGrade, &previousSslGrade, &logo, &title, &updatedAt)
+	var servers, endpoints []byte
+	var serversChanged, isDown bool
+	err := r.db.QueryRow("SELECT * FROM domains WHERE id=$1", ID).Scan(&id, &servers, &endpoints, &url, &sslGrade, &previousSslGrade, &logo, &title, &updatedAt, &serversChanged, &isDown)
 	if err != nil {
 		return nil, err
 	}
-	serversStruct, decodeErr := jsonToServers(servers)
-	if decodeErr != nil {
-		return nil, decodeErr
+	var serversStruct []models.Server
+	err = json.Unmarshal(servers, &serversStruct)
+	if err != nil {
+		return nil, err
 	}
-	domain := &models.Domain{serversStruct, false, sslGrade, previousSslGrade, logo, title, false, id, url, updatedAt}
+	var endpointsStruct []models.Endpoint
+	err = json.Unmarshal(endpoints, &endpointsStruct)
+	if err != nil {
+		return nil, err
+	}
+	domain := &models.Domain{serversStruct, endpointsStruct, serversChanged, sslGrade, previousSslGrade, logo, title, isDown, id, url, updatedAt}
 	return domain, nil
 }
 
@@ -57,16 +64,23 @@ func (r *DomainRepo) GetAll() ([]*models.Domain, error) {
 	for rows.Next() {
 		var id, updatedAt int64
 		var url, sslGrade, previousSslGrade, logo, title string
-		var servers []byte
-		err := rows.Scan(&id, &servers, &url, &sslGrade, &previousSslGrade, &logo, &title, &updatedAt)
+		var servers, endpoints []byte
+		var serversChanged, isDown bool
+		err := rows.Scan(&id, &servers, &endpoints, &url, &sslGrade, &previousSslGrade, &logo, &title, &updatedAt, &serversChanged, &isDown)
 		if err != nil {
 			return nil, err
 		}
-		serversStruct, decodeErr := jsonToServers(servers)
+		var serversStruct []models.Server
+		decodeErr := json.Unmarshal(servers, &serversStruct)
 		if decodeErr != nil {
 			return nil, decodeErr
 		}
-		domain := &models.Domain{serversStruct, false, sslGrade, previousSslGrade, logo, title, false, id, url, updatedAt}
+		var endpointsStruct []models.Endpoint
+		decodeErr = json.Unmarshal(endpoints, &endpointsStruct)
+		if err != nil {
+			return nil, err
+		}
+		domain := &models.Domain{serversStruct, endpointsStruct, serversChanged, sslGrade, previousSslGrade, logo, title, isDown, id, url, updatedAt}
 		domains = append(domains, domain)
 	}
 	if err = rows.Err(); err != nil {
@@ -83,11 +97,15 @@ func (r *DomainRepo) GetAll() ([]*models.Domain, error) {
 // (error): Error if the process fails
 func (r *DomainRepo) Save(domain *models.Domain) (int64, error) {
 	id := int64(-1)
-	jsonServers, jsonError := serversToJson(domain.Servers)
-	if jsonError != nil {
-		return id, jsonError
+	jsonServers, jServerError := json.Marshal(domain.Servers)
+	if jServerError != nil {
+		return id, jServerError
 	}
-	queryErr := r.db.QueryRow(`INSERT INTO domains (servers, url, sslGrade, previousSslGrade, logo, title, updatedAt) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`, jsonServers, domain.Url, domain.SslGrade, domain.PreviousSslGrade, domain.Logo, domain.Title, domain.UpdatedAt).Scan(&id)
+	jsonEndpoints, jEndpointsError := json.Marshal(domain.Endpoints)
+	if jEndpointsError != nil {
+		return id, jEndpointsError
+	}
+	queryErr := r.db.QueryRow(`INSERT INTO domains (servers, endpoints, url, sslGrade, previousSslGrade, logo, title, updatedAt, serversChanged, isDown) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`, jsonServers, jsonEndpoints, domain.Url, domain.SslGrade, domain.PreviousSslGrade, domain.Logo, domain.Title, domain.UpdatedAt, domain.ServersChanged, domain.IsDown).Scan(&id)
 	if queryErr != nil {
 		return id, queryErr
 	}
@@ -102,11 +120,15 @@ func (r *DomainRepo) Save(domain *models.Domain) (int64, error) {
 // (error): Error if the process fails
 func (r *DomainRepo) Update(domain *models.Domain) (int64, error) {
 	id := int64(-1)
-	jsonServers, jsonError := serversToJson(domain.Servers)
-	if jsonError != nil {
-		return id, jsonError
+	jsonServers, jServerError := json.Marshal(domain.Servers)
+	if jServerError != nil {
+		return id, jServerError
 	}
-	_, queryErr := r.db.Exec(`UPDATE domains SET servers=$1, url=$2, sslGrade=$3, previousSslGrade=$4, logo=$5, title=$6, updatedAt=$7 WEHRE id=$8`, jsonServers, domain.Url, domain.SslGrade, domain.PreviousSslGrade, domain.Logo, domain.Title, domain.UpdatedAt, domain.Id)
+	jsonEndpoints, jEndpointsError := json.Marshal(domain.Endpoints)
+	if jEndpointsError != nil {
+		return id, jEndpointsError
+	}
+	_, queryErr := r.db.Exec(`UPDATE domains SET servers=$1, endpoints=$2, url=$3, sslGrade=$4, previousSslGrade=$5, logo=$6, title=$7, updatedAt=$8, serversChanged=$9, isDown=$10 WHERE id=$11`, jsonServers, jsonEndpoints, domain.Url, domain.SslGrade, domain.PreviousSslGrade, domain.Logo, domain.Title, domain.UpdatedAt, domain.ServersChanged, domain.IsDown, domain.Id)
 	if queryErr != nil {
 		return id, queryErr
 	}
@@ -132,40 +154,22 @@ func (r *DomainRepo) Delete(ID int) error {
 func (r *DomainRepo) FindByUrl(Url string) (*models.Domain, error) {
 	var id, updatedAt int64
 	var url, sslGrade, previousSslGrade, logo, title string
-	var servers []byte
-	err := r.db.QueryRow("SELECT * FROM domains WHERE url=$1", Url).Scan(&id, &servers, &url, &sslGrade, &previousSslGrade, &logo, &title, &updatedAt)
+	var servers, endpoints []byte
+	var serversChanged, isDown bool
+	err := r.db.QueryRow("SELECT * FROM domains WHERE url=$1", Url).Scan(&id, &servers, &endpoints, &url, &sslGrade, &previousSslGrade, &logo, &title, &updatedAt, &serversChanged, &isDown)
 	if err != nil {
 		return nil, err
 	}
-	serversStruct, decodeErr := jsonToServers(servers)
+	var serversStruct []models.Server
+	decodeErr := json.Unmarshal(servers, &serversStruct)
 	if decodeErr != nil {
 		return nil, decodeErr
 	}
-	domain := &models.Domain{serversStruct, false, sslGrade, previousSslGrade, logo, title, false, id, url, updatedAt}
-	return domain, nil
-}
-
-// serversToJson: Auxiliary function to parse a server-type object slice to JSON format
-// Params:
-// (servers): Domain slice
-// Return:
-// ([]byte): JSON object
-// (error): Error if the process fails
-func serversToJson(servers []models.Server) ([]byte, error) {
-	return json.Marshal(servers)
-}
-
-// jsonToServers: Auxiliary function to parse a JSON format to server-type object slice
-// Params:
-// (jsonData): JSON format
-// Return:
-// ([]models.Server): Domain slice
-// (error): Error if the process fails
-func jsonToServers(jsonData []byte) ([]models.Server, error) {
-	var servers []models.Server
-	err := json.Unmarshal(jsonData, &servers)
+	var endpointsStruct []models.Endpoint
+	decodeErr = json.Unmarshal(endpoints, &endpointsStruct)
 	if err != nil {
 		return nil, err
 	}
-	return servers, nil
+	domain := &models.Domain{serversStruct, endpointsStruct, serversChanged, sslGrade, previousSslGrade, logo, title, isDown, id, url, updatedAt}
+	return domain, nil
 }
