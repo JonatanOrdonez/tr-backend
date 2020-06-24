@@ -31,6 +31,7 @@ func main() {
 	dbHost := os.Getenv("DB_HOST")
 	dbName := os.Getenv("DB_NAME")
 	dbUser := os.Getenv("DB_USER")
+	whiteList := os.Getenv("WHITE_LIST")
 	port := os.Getenv("PORT")
 
 	// Init database...
@@ -48,14 +49,11 @@ func main() {
 		router.GET("/api/v1/analyze", domainController.ResponseCheckDomain)
 
 		withCors := cors.NewCorsHandler(cors.Options{
-			// if you leave allowedOrigins empty then fasthttpcors will treat it as "*"
-			AllowedOrigins: []string{"*"}, // Only allow example.com to access the resource
-			// if you leave allowedHeaders empty then fasthttpcors will accept any non-simple headers
-			AllowedHeaders: []string{"x-something-client", "Content-Type"}, // only allow x-something-client and Content-Type in actual request
-			// if you leave this empty, only simple method will be accepted
-			AllowedMethods:   []string{"GET", "POST"}, // only allow get or post to resource
-			AllowCredentials: false,                   // resource doesn't support credentials
-			AllowMaxAge:      5600,                    // cache the preflight result
+			AllowedOrigins:   []string{whiteList},
+			AllowedHeaders:   []string{"x-something-client", "Content-Type"},
+			AllowedMethods:   []string{"GET"},
+			AllowCredentials: false,
+			AllowMaxAge:      5600,
 			Debug:            true,
 		})
 
